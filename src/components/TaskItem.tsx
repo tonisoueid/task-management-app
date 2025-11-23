@@ -15,9 +15,10 @@ import { format, isToday, isTomorrow, isPast } from 'date-fns';
 
 interface TaskItemProps {
   task: Task;
+  onEdit: (task: Task) => void;
 }
 
-export const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
+export const TaskItem: React.FC<TaskItemProps> = ({ task, onEdit }) => {
   const { toggleTask, deleteTask, projects } = useTaskStore();
   const [showMenu, setShowMenu] = useState(false);
   const project = projects.find(p => p.id === task.projectId);
@@ -35,6 +36,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
   };
 
   const isDueDatePast = task.dueDate && isPast(task.dueDate) && !task.completed;
+
+  const handleEdit = () => {
+    setShowMenu(false);
+    onEdit(task);
+  };
 
   return (
     <div className={`group relative bg-surface border border-border rounded-xl p-4 hover:border-primary/30 transition-all duration-200 ${
@@ -122,7 +128,10 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
                 onClick={() => setShowMenu(false)}
               />
               <div className="absolute right-0 top-10 w-48 bg-surface border border-border rounded-xl shadow-xl z-20 overflow-hidden animate-scale-in">
-                <button className="w-full flex items-center gap-3 px-4 py-3 hover:bg-background transition-colors text-left">
+                <button 
+                  onClick={handleEdit}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-background transition-colors text-left"
+                >
                   <Edit className="w-4 h-4 text-textSecondary" />
                   <span className="text-sm text-text">Edit Task</span>
                 </button>

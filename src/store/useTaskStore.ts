@@ -140,10 +140,26 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
   
   updateTask: (id, updates) => {
+    const state = get();
+    const oldTask = state.tasks.find(t => t.id === id);
+    const newProjectId = updates.projectId;
+    
     set((state) => ({
       tasks: state.tasks.map(task => 
         task.id === id ? { ...task, ...updates } : task
       ),
+      // Update project counts if project changed
+      projects: oldTask && newProjectId && oldTask.projectId !== newProjectId
+        ? state.projects.map(p => {
+            if (p.id === oldTask.projectId) {
+              return { ...p, taskCount: Math.max(0, p.taskCount - 1) };
+            }
+            if (p.id === newProjectId) {
+              return { ...p, taskCount: p.taskCount + 1 };
+            }
+            return p;
+          })
+        : state.projects,
     }));
   },
   

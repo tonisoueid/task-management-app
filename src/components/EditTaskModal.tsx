@@ -1,15 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Flag, Tag, FolderOpen } from 'lucide-react';
 import { useTaskStore } from '../store/useTaskStore';
+import { Task } from '../types';
 import { DatePicker } from './DatePicker';
 
-interface AddTaskModalProps {
+interface EditTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
+  task: Task | null;
 }
 
-export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) => {
-  const { addTask, projects } = useTaskStore();
+export const EditTaskModal: React.FC<EditTaskModalProps> = ({ isOpen, onClose, task }) => {
+  const { updateTask, projects } = useTaskStore();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
@@ -17,43 +19,51 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [tags, setTags] = useState('');
 
+  // Populate form when task changes
+  useEffect(() => {
+    if (task) {
+      setTitle(task.title);
+      setDescription(task.description || '');
+      setPriority(task.priority);
+      setProjectId(task.projectId);
+      setDueDate(task.dueDate ? new Date(task.dueDate) : null);
+      setTags(task.tags.join(', '));
+    }
+  }, [task]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!title.trim()) return;
+    if (!title.trim() || !task) return;
 
-    addTask({
+    updateTask(task.id, {
       title: title.trim(),
       description: description.trim() || undefined,
-      completed: false,
       priority,
       projectId,
       dueDate: dueDate || undefined,
       tags: tags.split(',').map(t => t.trim()).filter(Boolean),
     });
 
-    // Reset form
-    setTitle('');
-    setDescription('');
-    setPriority('medium');
-    setProjectId('inbox');
-    setDueDate(null);
-    setTags('');
     onClose();
   };
 
-  if (!isOpen) return null;
+  const handleClose = () => {
+    onClose();
+  };
+
+  if (!isOpen || !task) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
       
       <div className="relative w-full max-w-2xl bg-surface border border-border rounded-2xl shadow-2xl animate-scale-in">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
-          <h2 className="text-2xl font-bold text-text">Add New Task</h2>
+          <h2 className="text-2xl font-bold text-text">Edit Task</h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 hover:bg-background rounded-xl transition-colors"
           >
             <X className="w-5 h-5 text-textSecondary" />
@@ -164,7 +174,7 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
           <div className="flex items-center justify-end gap-3 pt-4">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-6 py-3 text-textSecondary hover:text-text hover:bg-background rounded-xl transition-all"
             >
               Cancel
@@ -174,7 +184,7 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
               disabled={!title.trim()}
               className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-xl font-medium hover:shadow-lg hover:shadow-primary/25 transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
-              Add Task
+              Save Changes
             </button>
           </div>
         </form>
