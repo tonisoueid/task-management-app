@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Flag, Tag, FolderOpen } from 'lucide-react';
+import { X, Flag, Tag, FolderOpen, AlertCircle } from 'lucide-react';
 import { useTaskStore } from '../store/useTaskStore';
 import { DatePicker } from './DatePicker';
 
@@ -16,13 +16,18 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
   const [projectId, setProjectId] = useState('inbox');
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [tags, setTags] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      setError('Title is required');
+      return;
+    }
 
-    addTask({
+    const result = addTask({
       title: title.trim(),
       description: description.trim() || undefined,
       completed: false,
@@ -32,6 +37,11 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
       tags: tags.split(',').map(t => t.trim()).filter(Boolean),
     });
 
+    if (!result.success) {
+      setError(result.error || 'Failed to add task');
+      return;
+    }
+
     // Reset form
     setTitle('');
     setDescription('');
@@ -39,6 +49,7 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
     setProjectId('inbox');
     setDueDate(null);
     setTags('');
+    setError(null);
     onClose();
   };
 
@@ -62,6 +73,14 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          {/* Error Message */}
+          {error && (
+            <div className="flex items-center gap-2 p-4 bg-error/10 border border-error/20 rounded-xl">
+              <AlertCircle className="w-5 h-5 text-error flex-shrink-0" />
+              <p className="text-smtext-error">{error}</p>
+            </div>
+          )}
+
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-text mb-2">
@@ -72,9 +91,11 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g., Review project proposal"
+              maxLength={200}
               className="w-full px-4 py-3 bg-background border border-border rounded-xl text-text placeholder-textSecondary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
               autoFocus
             />
+            <p className="text-xs text-textSecondary mt-1">{title.length}/200 characters</p>
           </div>
 
           {/* Description */}
@@ -87,8 +108,10 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Add more details about this task..."
               rows={3}
+              maxLength={1000}
               className="w-full px-4 py-3 bg-background border border-border rounded-xl text-text placeholder-textSecondary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all resize-none"
             />
+            <p className="text-xs text-textSecondary mt-1">{description.length}/1000 characters</p>
           </div>
 
           {/* Grid Layout for Metadata */}
@@ -155,8 +178,10 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
                 placeholder="urgent, review, meeting"
+                maxLength={200}
                 className="w-full px-4 py-3 bg-background border border-border rounded-xl text-text placeholder-textSecondary focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
               />
+              <p className="text-xs text-textSecondary mt-1">Separate with commas (max 10 tags)</p>
             </div>
           </div>
 

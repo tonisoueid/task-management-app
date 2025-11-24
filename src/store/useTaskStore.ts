@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import { Task, Project, ViewMode } from '../types';
-import { isToday, isFuture, isPast } from 'date-fns';
+import { isToday, isFuture } from 'date-fns';
+import {
+  generateSecureId,
+  sanitizeText,
+  sanitizeTags,
+  validateTaskTitle,
+  validateDescription,
+  validateProjectName,
+  rateLimiter,
+  isValidUUID,
+} from '../utils/security';
 
 interface TaskStore {
   tasks: Task[];
@@ -9,14 +19,14 @@ interface TaskStore {
   selectedProject: string | null;
   searchQuery: string;
   
-  addTask: (task: Omit<Task, 'id' | 'createdAt'>) => void;
-  updateTask: (id: string, updates: Partial<Task>) => void;
-  deleteTask: (id: string) => void;
+  addTask: (task: Omit<Task, 'id' | 'createdAt'>) => { success: boolean; error?: string };
+  updateTask: (id: string, updates: Partial<Task>) => { success: boolean; error?: string };
+  deleteTask: (id: string) => { success: boolean; error?: string };
   toggleTask: (id: string) => void;
   
-  addProject: (project: Omit<Project, 'id' | 'taskCount'>) => void;
-  updateProject: (id: string, updates: Partial<Project>) => void;
-  deleteProject: (id: string) => void;
+  addProject: (project: Omit<Project, 'id' | 'taskCount'>) => { success: boolean; error?: string };
+  updateProject: (id: string, updates: Partial<Project>) => { success: boolean; error?: string };
+  deleteProject: (id: string) => { success: boolean; error?: string };
   
   setCurrentView: (view: ViewMode) => void;
   setSelectedProject: (projectId: string | null) => void;
@@ -26,154 +36,183 @@ interface TaskStore {
 }
 
 const defaultProjects: Project[] = [
-  { id: 'inbox', name: 'Inbox', color: '#38bdf8', icon: 'Inbox', taskCount: 0 },
-  { id: 'work', name: 'Work', color: '#9E7FFF', icon: 'Briefcase', taskCount: 0 },
-  { id: 'personal', name: 'Personal', color: '#f472b6', icon: 'User', taskCount: 0 },
-  { id: 'shopping', name: 'Shopping', color: '#10b981', icon: 'ShoppingCart', taskCount: 0 },
-];
-
-const sampleTasks: Task[] = [
-  {
-    id: '1',
-    title: 'Review project proposal',
-    description: 'Go through the Q1 marketing proposal and provide feedback',
-    completed: false,
-    priority: 'high',
-    dueDate: new Date(),
-    projectId: 'work',
-    createdAt: new Date(),
-    tags: ['urgent', 'review'],
-  },
-  {
-    id: '2',
-    title: 'Schedule team meeting',
-    description: 'Set up weekly sync with the development team',
-    completed: false,
-    priority: 'medium',
-    dueDate: new Date(Date.now() + 86400000),
-    projectId: 'work',
-    createdAt: new Date(),
-    tags: ['meeting'],
-  },
-  {
-    id: '3',
-    title: 'Buy groceries',
-    description: 'Milk, eggs, bread, vegetables',
-    completed: false,
-    priority: 'low',
-    dueDate: new Date(Date.now() + 172800000),
-    projectId: 'shopping',
-    createdAt: new Date(),
-    tags: ['errands'],
-  },
-  {
-    id: '4',
-    title: 'Finish quarterly report',
-    completed: true,
-    priority: 'high',
-    dueDate: new Date(Date.now() - 86400000),
-    projectId: 'work',
-    createdAt: new Date(Date.now() - 172800000),
-    tags: ['report'],
-  },
-  {
-    id: '5',
-    title: 'Call dentist for appointment',
-    completed: false,
-    priority: 'medium',
-    projectId: 'personal',
-    createdAt: new Date(),
-    tags: ['health'],
-  },
-  {
-    id: '6',
-    title: 'Update portfolio website',
-    description: 'Add recent projects and update bio section',
-    completed: false,
-    priority: 'medium',
-    dueDate: new Date(Date.now() + 259200000),
-    projectId: 'personal',
-    createdAt: new Date(),
-    tags: ['development'],
-  },
-  {
-    id: '7',
-    title: 'Prepare presentation slides',
-    description: 'Create slides for client pitch next week',
-    completed: false,
-    priority: 'high',
-    dueDate: new Date(Date.now() + 345600000),
-    projectId: 'work',
-    createdAt: new Date(),
-    tags: ['presentation', 'client'],
-  },
-  {
-    id: '8',
-    title: 'Read "Atomic Habits"',
-    completed: false,
-    priority: 'low',
-    projectId: 'personal',
-    createdAt: new Date(),
-    tags: ['reading', 'self-improvement'],
-  },
+  { id: generateSecureId(), name: 'Inbox', color: '#38bdf8', icon: 'Inbox', taskCount: 0 },
+  { id: generateSecureId(), name: 'Work', color: '#9E7FFF', icon: 'Briefcase', taskCount: 0 },
+  { id: generateSecureId(), name: 'Personal', color: '#f472b6', icon: 'User', taskCount: 0 },
 ];
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
-  tasks: sampleTasks,
+  tasks: [],
   projects: defaultProjects,
   currentView: 'today',
   selectedProject: null,
   searchQuery: '',
   
   addTask: (task) => {
-    const newTask: Task = {
-      ...task,
-      id: Date.now().toString(),
-      createdAt: new Date(),
-    };
-    set((state) => ({
-      tasks: [newTask, ...state.tasks],
-      projects: state.projects.map(p => 
-        p.id === task.projectId ? { ...p, taskCount: p.taskCount + 1 } : p
-      ),
-    }));
+    // Rate limiting
+    if (!rateLimiter.canPerformAction('addTask')) {
+      return { success: false, error: 'Too many requests. Please wait a moment.' };
+    }
+
+    // Validate and sanitize title
+    const titleValidation = validateTaskTitle(task.title);
+    if (!titleValidation.valid) {
+      return { success: false, error: titleValidation.error };
+    }
+    const sanitizedTitle = sanitizeText(task.title, 200);
+
+    // Validate and sanitize description
+    if (task.description) {
+      const descValidation = validateDescription(task.description);
+      if (!descValidation.valid) {
+        return { success: false, error: descValidation.error };
+      }
+    }
+    const sanitizedDescription = task.description ? sanitizeText(task.description, 1000) : undefined;
+
+    // Sanitize tags
+    const sanitizedTagsArray = sanitizeTags(task.tags);
+
+    // Validate project exists
+    const projectExists = get().projects.some(p => p.id === task.projectId);
+    if (!projectExists) {
+      return { success: false, error: 'Invalid project selected' };
+    }
+
+    try {
+      const newTask: Task = {
+        ...task,
+        id: generateSecureId(),
+        title: sanitizedTitle,
+        description: sanitizedDescription,
+        tags: sanitizedTagsArray,
+        createdAt: new Date(),
+      };
+
+      set((state) => ({
+        tasks: [newTask, ...state.tasks],
+        projects: state.projects.map(p => 
+          p.id === task.projectId ? { ...p, taskCount: p.taskCount + 1 } : p
+        ),
+      }));
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error adding task:', error);
+      return { success: false, error: 'Failed to add task' };
+    }
   },
   
   updateTask: (id, updates) => {
+    // Validate ID
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid task ID' };
+    }
+
+    // Rate limiting
+    if (!rateLimiter.canPerformAction('updateTask')) {
+      return { success: false, error: 'Too many requests. Please wait a moment.' };
+    }
+
     const state = get();
     const oldTask = state.tasks.find(t => t.id === id);
-    const newProjectId = updates.projectId;
     
-    set((state) => ({
-      tasks: state.tasks.map(task => 
-        task.id === id ? { ...task, ...updates } : task
-      ),
-      // Update project counts if project changed
-      projects: oldTask && newProjectId && oldTask.projectId !== newProjectId
-        ? state.projects.map(p => {
-            if (p.id === oldTask.projectId) {
-              return { ...p, taskCount: Math.max(0, p.taskCount - 1) };
-            }
-            if (p.id === newProjectId) {
-              return { ...p, taskCount: p.taskCount + 1 };
-            }
-            return p;
-          })
-        : state.projects,
-    }));
+    if (!oldTask) {
+      return { success: false, error: 'Task not found' };
+    }
+
+    try {
+      // Validate and sanitize updates
+      const sanitizedUpdates: Partial<Task> = { ...updates };
+
+      if (updates.title !== undefined) {
+        const titleValidation = validateTaskTitle(updates.title);
+        if (!titleValidation.valid) {
+          return { success: false, error: titleValidation.error };
+        }
+        sanitizedUpdates.title = sanitizeText(updates.title, 200);
+      }
+
+      if (updates.description !== undefined) {
+        const descValidation = validateDescription(updates.description);
+        if (!descValidation.valid) {
+          return { success: false, error: descValidation.error };
+        }
+        sanitizedUpdates.description = sanitizeText(updates.description, 1000);
+      }
+
+      if (updates.tags !== undefined) {
+        sanitizedUpdates.tags = sanitizeTags(updates.tags);
+      }
+
+      if (updates.projectId !== undefined) {
+        const projectExists = state.projects.some(p => p.id === updates.projectId);
+        if (!projectExists) {
+          return { success: false, error: 'Invalid project selected' };
+        }
+      }
+
+      const newProjectId = sanitizedUpdates.projectId;
+      
+      set((state) => ({
+        tasks: state.tasks.map(task => 
+          task.id === id ? { ...task, ...sanitizedUpdates } : task
+        ),
+        projects: oldTask && newProjectId && oldTask.projectId !== newProjectId
+          ? state.projects.map(p => {
+              if (p.id === oldTask.projectId) {
+                return { ...p, taskCount: Math.max(0, p.taskCount - 1) };
+              }
+              if (p.id === newProjectId) {
+                return { ...p, taskCount: p.taskCount + 1 };
+              }
+              return p;
+            })
+          : state.projects,
+      }));
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating task:', error);
+      return { success: false, error: 'Failed to update task' };
+    }
   },
   
   deleteTask: (id) => {
-    const task = get().tasks.find(t => t.id === id);
-    set((state) => ({
-      tasks: state.tasks.filter(t => t.id !== id),
-      projects: state.projects.map(p => 
-        p.id === task?.projectId ? { ...p, taskCount: Math.max(0, p.taskCount - 1) } : p
-      ),
-    }));
+    // Validate ID
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid task ID' };
+    }
+
+    // Rate limiting
+    if (!rateLimiter.canPerformAction('deleteTask')) {
+      return { success: false, error: 'Too many requests. Please wait a moment.' };
+    }
+
+    try {
+      const task = get().tasks.find(t => t.id === id);
+      
+      if (!task) {
+        return { success: false, error: 'Task not found' };
+      }
+
+      set((state) => ({
+        tasks: state.tasks.filter(t => t.id !== id),
+        projects: state.projects.map(p => 
+          p.id === task?.projectId ? { ...p, taskCount: Math.max(0, p.taskCount - 1) } : p
+        ),
+      }));
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      return { success: false, error: 'Failed to delete task' };
+    }
   },
   
   toggleTask: (id) => {
+    if (!isValidUUID(id)) return;
+
     set((state) => ({
       tasks: state.tasks.map(task => 
         task.id === id ? { ...task, completed: !task.completed } : task
@@ -182,34 +221,94 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
   
   addProject: (project) => {
-    const newProject: Project = {
-      ...project,
-      id: Date.now().toString(),
-      taskCount: 0,
-    };
-    set((state) => ({
-      projects: [...state.projects, newProject],
-    }));
+    // Rate limiting
+    if (!rateLimiter.canPerformAction('addProject')) {
+      return { success: false, error: 'Too many requests. Please wait a moment.' };
+    }
+
+    // Validate project name
+    const nameValidation = validateProjectName(project.name);
+    if (!nameValidation.valid) {
+      return { success: false, error: nameValidation.error };
+    }
+
+    try {
+      const sanitizedName = sanitizeText(project.name, 100);
+
+      const newProject: Project = {
+        ...project,
+        id: generateSecureId(),
+        name: sanitizedName,
+        taskCount: 0,
+      };
+
+      set((state) => ({
+        projects: [...state.projects, newProject],
+      }));
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error adding project:', error);
+      return { success: false, error: 'Failed to add project' };
+    }
   },
   
   updateProject: (id, updates) => {
-    set((state) => ({
-      projects: state.projects.map(project => 
-        project.id === id ? { ...project, ...updates } : project
-      ),
-    }));
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid project ID' };
+    }
+
+    try {
+      const sanitizedUpdates: Partial<Project> = { ...updates };
+
+      if (updates.name !== undefined) {
+        const nameValidation = validateProjectName(updates.name);
+        if (!nameValidation.valid) {
+          return { success: false, error: nameValidation.error };
+        }
+        sanitizedUpdates.name = sanitizeText(updates.name, 100);
+      }
+
+      set((state) => ({
+        projects: state.projects.map(project => 
+          project.id === id ? { ...project, ...sanitizedUpdates } : project
+        ),
+      }));
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating project:', error);
+      return { success: false, error: 'Failed to update project' };
+    }
   },
   
   deleteProject: (id) => {
-    set((state) => ({
-      projects: state.projects.filter(p => p.id !== id),
-      tasks: state.tasks.filter(t => t.projectId !== id),
-    }));
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid project ID' };
+    }
+
+    try {
+      set((state) => ({
+        projects: state.projects.filter(p => p.id !== id),
+        tasks: state.tasks.filter(t => t.projectId !== id),
+      }));
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting project:', error);
+      return { success: false, error: 'Failed to delete project' };
+    }
   },
   
   setCurrentView: (view) => set({ currentView: view, selectedProject: null }),
-  setSelectedProject: (projectId) => set({ selectedProject: projectId, currentView: 'all' }),
-  setSearchQuery: (query) => set({ searchQuery: query }),
+  setSelectedProject: (projectId) => {
+    if (projectId && !isValidUUID(projectId)) return;
+    set({ selectedProject: projectId, currentView: 'all' });
+  },
+  setSearchQuery: (query) => {
+    const sanitizedQuery = sanitizeText(query, 200);
+    set({ searchQuery: sanitizedQuery });
+  },
   
   getFilteredTasks: () => {
     const { tasks, currentView, selectedProject, searchQuery } = get();
@@ -218,10 +317,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     
     // Filter by search query
     if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
       filtered = filtered.filter(task => 
-        task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        task.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        task.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+        task.title.toLowerCase().includes(lowerQuery) ||
+        task.description?.toLowerCase().includes(lowerQuery) ||
+        task.tags.some(tag => tag.toLowerCase().includes(lowerQuery))
       );
     }
     
